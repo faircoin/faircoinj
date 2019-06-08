@@ -1,5 +1,6 @@
 /*
  * Copyright 2013 Google Inc.
+ * Copyright 2019 Andreas Schildbach
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +22,7 @@ import org.bitcoinj.core.*;
 import java.math.BigInteger;
 
 /**
- * Network parameters used by the bitcoinj unit tests (and potentially your own). This lets you solve a block using
- * {@link org.bitcoinj.core.Block#solve()} by setting difficulty to the easiest possible.
+ * Network parameters used by the bitcoinj unit tests (and potentially your own).
  */
 public class UnitTestParams extends AbstractBitcoinNetParams {
     public static final int UNITNET_MAJORITY_WINDOW = 8;
@@ -35,11 +35,8 @@ public class UnitTestParams extends AbstractBitcoinNetParams {
         packetMagic = 0x0b110907;
         addressHeader = 111;
         p2shHeader = 196;
-        acceptableAddressCodes = new int[] { addressHeader, p2shHeader };
         maxTarget = new BigInteger("00ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16);
         genesisBlock.setTime(System.currentTimeMillis() / 1000);
-        genesisBlock.setDifficultyTarget(Block.EASIEST_DIFFICULTY_TARGET);
-        genesisBlock.solve();
         port = 18333;
         interval = 10;
         dumpedPrivateKeyHeader = 239;
@@ -48,8 +45,12 @@ public class UnitTestParams extends AbstractBitcoinNetParams {
         subsidyDecreaseBlockCount = 100;
         dnsSeeds = null;
         addrSeeds = null;
-        bip32HeaderPub = 0x043587CF;
-        bip32HeaderPriv = 0x04358394;
+        bip32HeaderP2PKHpub = 0x043587cf; // The 4 byte header that serializes in base58 to "tpub".
+        bip32HeaderP2PKHpriv = 0x04358394; // The 4 byte header that serializes in base58 to "tprv"
+
+        genesisBlock.setCreatorId(0xc001d00dL);
+        genesisBlock.setTime(1486481640L);
+        genesisBlock.setCreatorSignature(SchnorrSignature.wrap("5c450c4924f0a037c45ff4a6abe027306432ff7c652be7ef1dc00e63ec72547b862a8304af56f68c67cd5355e785cdce97d2472649347f7890c6fef2da5fa263"));
 
         majorityEnforceBlockUpgrade = 3;
         majorityRejectBlockOutdated = 4;

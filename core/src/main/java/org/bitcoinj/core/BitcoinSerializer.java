@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -71,12 +72,16 @@ public class BitcoinSerializer extends MessageSerializer {
         names.put(RejectMessage.class, "reject");
         names.put(GetUTXOsMessage.class, "getutxos");
         names.put(UTXOsMessage.class, "utxos");
+        names.put(SendHeadersMessage.class, "sendheaders");
+        names.put(NoncePoolMessage.class, "noncepool");
+        names.put(ChainSigMessage.class, "sig");
+        names.put(ChainDataMessage.class, "chaindata");
     }
 
     /**
      * Constructs a BitcoinSerializer with the given behavior.
      *
-     * @param params           networkParams used to create Messages instances and termining packetMagic
+     * @param params           networkParams used to create Messages instances and determining packetMagic
      * @param parseRetain      retain the backing byte array of a message for fast reserialization.
      */
     public BitcoinSerializer(NetworkParameters params, boolean parseRetain) {
@@ -229,6 +234,14 @@ public class BitcoinSerializer extends MessageSerializer {
             return new UTXOsMessage(params, payloadBytes);
         } else if (command.equals("getutxos")) {
             return new GetUTXOsMessage(params, payloadBytes);
+        } else if (command.equals("sendheaders")) {
+            return new SendHeadersMessage(params, payloadBytes);
+        } else if (command.equals("noncepool")) {
+            return new NoncePoolMessage(params, payloadBytes);
+        } else if (command.equals("sig")) {
+            return new ChainSigMessage(params, payloadBytes);
+        } else if (command.equals("chaindata")) {
+            return new ChainDataMessage(params, payloadBytes);
         } else {
             log.warn("No support for deserializing message with name {}", command);
             return new UnknownMessage(params, command, payloadBytes);
@@ -302,12 +315,9 @@ public class BitcoinSerializer extends MessageSerializer {
      * serialization format support.
      */
     @Override
-    public Transaction makeTransaction(byte[] payloadBytes, int offset,
-        int length, byte[] hash) throws ProtocolException {
-        Transaction tx = new Transaction(params, payloadBytes, offset, null, this, length);
-        if (hash != null)
-            tx.setHash(Sha256Hash.wrapReversed(hash));
-        return tx;
+    public Transaction makeTransaction(byte[] payloadBytes, int offset, int length, byte[] hashFromHeader)
+            throws ProtocolException {
+        return new Transaction(params, payloadBytes, offset, null, this, length, hashFromHeader);
     }
 
     @Override
@@ -361,7 +371,7 @@ public class BitcoinSerializer extends MessageSerializer {
             for (; header[cursor] != 0 && cursor < COMMAND_LEN; cursor++) ;
             byte[] commandBytes = new byte[cursor];
             System.arraycopy(header, 0, commandBytes, 0, cursor);
-            command = Utils.toString(commandBytes, "US-ASCII");
+            command = new String(commandBytes, StandardCharsets.US_ASCII);
             cursor = COMMAND_LEN;
 
             size = (int) readUint32(header, cursor);

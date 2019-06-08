@@ -21,6 +21,7 @@ import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.ECKey;
 import org.bitcoinj.core.ECKey.ECDSASignature;
 import org.bitcoinj.core.NetworkParameters;
+import org.bitcoinj.core.SignatureDecodeException;
 import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.core.TransactionInput;
@@ -89,6 +90,13 @@ public class DefaultRiskAnalysis implements RiskAnalysis {
             return Result.NON_FINAL;
         }
 
+        // Relative time-locked transactions are risky too. We can't check the locks because usually we don't know the
+        // spent outputs (to know when they were created).
+        if (tx.hasRelativeLockTime()) {
+            nonFinal = tx;
+            return Result.NON_FINAL;
+        }
+
         if (wallet == null)
             return null;
 
@@ -114,7 +122,7 @@ public class DefaultRiskAnalysis implements RiskAnalysis {
 
     /**
      * The reason a transaction is considered non-standard, returned by
-     * {@link #isStandard(org.bitcoinj.core.Transaction)}.
+     * {@link #isStandard(Transaction)}.
      */
     public enum RuleViolation {
         NONE,
@@ -133,7 +141,7 @@ public class DefaultRiskAnalysis implements RiskAnalysis {
      */
     public static RuleViolation isStandard(Transaction tx) {
         // TODO: Finish this function off.
-        if (tx.getVersion() > 1 || tx.getVersion() < 1) {
+        if (tx.getVersion() > 2 || tx.getVersion() < 1) {
             log.warn("TX considered non-standard due to unknown version number {}", tx.getVersion());
             return RuleViolation.VERSION;
         }
@@ -183,7 +191,7 @@ public class DefaultRiskAnalysis implements RiskAnalysis {
                 ECDSASignature signature;
                 try {
                     signature = ECKey.ECDSASignature.decodeFromDER(chunk.data);
-                } catch (RuntimeException x) {
+                } catch (SignatureDecodeException x) {
                     // Doesn't look like a signature.
                     signature = null;
                 }
@@ -236,11 +244,11 @@ public class DefaultRiskAnalysis implements RiskAnalysis {
     @Override
     public String toString() {
         if (!analyzed)
-            return "Pending risk analysis for " + tx.getHashAsString();
+            return "Pending risk analysis for " + tx.getTxId();
         else if (nonFinal != null)
-            return "Risky due to non-finality of " + nonFinal.getHashAsString();
+            return "Risky due to non-finality of " + nonFinal.getTxId();
         else if (nonStandard != null)
-            return "Risky due to non-standard tx " + nonStandard.getHashAsString();
+            return "Risky due to non-standard tx " + nonStandard.getTxId();
         else
             return "Non-risky";
     }

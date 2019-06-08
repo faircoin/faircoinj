@@ -89,7 +89,7 @@ public class ExamplePaymentChannelClient {
             }
         }
         NetworkParameters params = net.value(opts).get();
-        new ExamplePaymentChannelClient().run(opts.nonOptionArguments().get(0), clientChannelProperties, params);
+        new ExamplePaymentChannelClient().run((String) opts.nonOptionArguments().get(0), clientChannelProperties, params);
     }
 
     public ExamplePaymentChannelClient() {
@@ -210,7 +210,7 @@ public class ExamplePaymentChannelClient {
         ListenableFuture<Coin> balanceFuture = appKit.wallet().getBalanceFuture(amountPlusFee, Wallet.BalanceType.ESTIMATED);
         if (!balanceFuture.isDone()) {
             System.out.println("Please send " + amountPlusFee.toFriendlyString() +
-                    " to " + myKey.toAddress(params));
+                    " to " + LegacyAddress.fromKey(params, myKey));
             Futures.getUnchecked(balanceFuture);
         }
     }

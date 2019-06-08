@@ -21,6 +21,7 @@ import com.google.common.base.*;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 import org.bitcoinj.core.listeners.*;
+import org.bitcoinj.script.ScriptException;
 import org.bitcoinj.store.*;
 import org.bitcoinj.utils.*;
 import org.bitcoinj.wallet.Wallet;
@@ -43,7 +44,7 @@ import static com.google.common.base.Preconditions.*;
  * <p>An AbstractBlockChain implementation must be connected to a {@link BlockStore} implementation. The chain object
  * by itself doesn't store any data, that's delegated to the store. Which store you use is a decision best made by
  * reading the getting started guide, but briefly, fully validating block chains need fully validating stores. In
- * the lightweight SPV mode, a {@link org.bitcoinj.store.SPVBlockStore} is the right choice.</p>
+ * the lightweight SPV mode, a {@link SPVBlockStore} is the right choice.</p>
  *
  * <p>This class implements an abstract class which makes it simple to create a BlockChain that does/doesn't do full
  * verification.  It verifies headers and is implements most of what is required to implement SPV mode, but
@@ -52,7 +53,7 @@ import static com.google.common.base.Preconditions.*;
  * <p>There are two subclasses of AbstractBlockChain that are useful: {@link BlockChain}, which is the simplest
  * class and implements <i>simplified payment verification</i>. This is a lightweight and efficient mode that does
  * not verify the contents of blocks, just their headers. A {@link FullPrunedBlockChain} paired with a
- * {@link org.bitcoinj.store.H2FullPrunedBlockStore} implements full verification, which is equivalent to
+ * {@link H2FullPrunedBlockStore} implements full verification, which is equivalent to
  * Bitcoin Core. To learn more about the alternative security models, please consult the articles on the
  * website.</p>
  *
@@ -84,6 +85,12 @@ public abstract class AbstractBlockChain {
     private final BlockStore blockStore;
 
     /**
+     * The mandatory transaction fee is set by the chain admin and compiled into a block by a CVN.
+     * The actual fee is represented in this field: DynamicChainParameters.transactionFee
+     */
+    private Coin mandatoryTransactionFee;
+
+    /**
      * Tracks the top of the best known chain.<p>
      *
      * Following this one down to the genesis block produces the story of the economy from the creation of Bitcoin
@@ -104,6 +111,7 @@ public abstract class AbstractBlockChain {
     private final CopyOnWriteArrayList<ListenerRegistration<NewBestBlockListener>> newBestBlockListeners;
     private final CopyOnWriteArrayList<ListenerRegistration<ReorganizeListener>> reorganizeListeners;
     private final CopyOnWriteArrayList<ListenerRegistration<TransactionReceivedInBlockListener>> transactionReceivedListeners;
+    private final CopyOnWriteArrayList<ListenerRegistration<TransactionFeeChangedListener>> txFeeChangeListeners;
 
     // Holds a block header and, optionally, a list of tx hashes or block's transactions
     class OrphanBlock {
@@ -153,6 +161,7 @@ public abstract class AbstractBlockChain {
         this.newBestBlockListeners = new CopyOnWriteArrayList<>();
         this.reorganizeListeners = new CopyOnWriteArrayList<>();
         this.transactionReceivedListeners = new CopyOnWriteArrayList<>();
+        this.txFeeChangeListeners = new CopyOnWriteArrayList<>();
         for (NewBestBlockListener l : wallets) addNewBestBlockListener(Threading.SAME_THREAD, l);
         for (ReorganizeListener l : wallets) addReorganizeListener(Threading.SAME_THREAD, l);
         for (TransactionReceivedInBlockListener l : wallets) addTransactionReceivedListener(Threading.SAME_THREAD, l);
@@ -171,6 +180,7 @@ public abstract class AbstractBlockChain {
         addNewBestBlockListener(Threading.SAME_THREAD, wallet);
         addReorganizeListener(Threading.SAME_THREAD, wallet);
         addTransactionReceivedListener(Threading.SAME_THREAD, wallet);
+        addTransactionFeeChangedListener(Threading.SAME_THREAD, wallet);
         int walletHeight = wallet.getLastBlockSeenHeight();
         int chainHeight = getBestChainHeight();
         if (walletHeight != chainHeight) {
@@ -196,27 +206,7 @@ public abstract class AbstractBlockChain {
         removeNewBestBlockListener(wallet);
         removeReorganizeListener(wallet);
         removeTransactionReceivedListener(wallet);
-    }
-
-    /** Replaced with more specific listener methods: use them instead. */
-    @Deprecated @SuppressWarnings("deprecation")
-    public void addListener(BlockChainListener listener) {
-        addListener(listener, Threading.USER_THREAD);
-    }
-
-    /** Replaced with more specific listener methods: use them instead. */
-    @Deprecated
-    public void addListener(BlockChainListener listener, Executor executor) {
-        addReorganizeListener(executor, listener);
-        addNewBestBlockListener(executor, listener);
-        addTransactionReceivedListener(executor, listener);
-    }
-
-    @Deprecated
-    public void removeListener(BlockChainListener listener) {
-        removeReorganizeListener(listener);
-        removeNewBestBlockListener(listener);
-        removeTransactionReceivedListener(listener);
+        removeTransactionFeeChangedListener(wallet);
     }
 
     /**
@@ -281,14 +271,42 @@ public abstract class AbstractBlockChain {
     public void removeTransactionReceivedListener(TransactionReceivedInBlockListener listener) {
         ListenerRegistration.removeFromList(listener, transactionReceivedListeners);
     }
-    
+
+    /**
+     * Adds a generic {@link TransactionReceivedInBlockListener} listener to the chain.
+     */
+    public void addTransactionFeeChangedListener(TransactionFeeChangedListener listener) {
+        addTransactionFeeChangedListener(Threading.USER_THREAD, listener);
+    }
+
+    /**
+     * Adds a generic {@link TransactionFeeChangedListener} listener to the chain.
+     */
+    public final void addTransactionFeeChangedListener(Executor executor, TransactionFeeChangedListener listener) {
+        txFeeChangeListeners.add(new ListenerRegistration<TransactionFeeChangedListener>(listener, executor));
+    }
+
+    /**
+     * Removes the given {@link TransactionFeeChangedListener} from the chain.
+     */
+    public void removeTransactionFeeChangedListener(TransactionFeeChangedListener listener) {
+        ListenerRegistration.removeFromList(listener, txFeeChangeListeners);
+    }
+
     /**
      * Returns the {@link BlockStore} the chain was constructed with. You can use this to iterate over the chain.
      */
     public BlockStore getBlockStore() {
         return blockStore;
     }
-    
+
+    /**
+     * Returns the current effective transaction fee
+     */
+    public Coin getMandatoryTransactionFee() {
+        return mandatoryTransactionFee;
+    }
+
     /**
      * Adds/updates the given {@link Block} with the block store.
      * This version is used when the transactions have not been verified.
@@ -485,7 +503,7 @@ public abstract class AbstractBlockChain {
             } else {
                 checkState(lock.isHeldByCurrentThread());
                 // It connects to somewhere on the chain. Not necessarily the top of the best known chain.
-                params.checkDifficultyTransitions(storedPrev, block, blockStore);
+                //params.checkDifficultyTransitions(storedPrev, block, blockStore);
                 connectBlock(block, storedPrev, shouldVerifyTransactions(), filteredTxHashList, filteredTxn);
             }
 
@@ -531,7 +549,24 @@ public abstract class AbstractBlockChain {
                 if (!tx.isFinal(storedPrev.getHeight() + 1, block.getTimeSeconds()))
                    throw new VerificationException("Block contains non-final transaction");
         }
-        
+
+        // we need to record the current mandatory transaction fee
+        if (block.hasChainParameters()) {
+            DynamicChainParameters dynamicChainParameters = block.getDynamicChainParams();
+            if (dynamicChainParameters != null) {
+                this.mandatoryTransactionFee = Coin.valueOf(dynamicChainParameters.getTransactionFee());
+                log.info("BlockChain: set mandatory transaction fee to: {}", mandatoryTransactionFee.toFriendlyString());
+                for (final ListenerRegistration<TransactionFeeChangedListener> registration : txFeeChangeListeners) {
+                    registration.executor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            registration.listener.onTransactionFeeChanged(mandatoryTransactionFee);
+                        }
+                    });
+                }
+            }
+        }
+
         StoredBlock head = getChainHead();
         if (storedPrev.equals(head)) {
             if (filtered && filteredTxn.size() > 0)  {
@@ -541,19 +576,6 @@ public abstract class AbstractBlockChain {
             }
             if (expensiveChecks && block.getTimeSeconds() <= getMedianTimestampOfRecentBlocks(head, blockStore))
                 throw new VerificationException("Block's timestamp is too early");
-
-            // BIP 66 & 65: Enforce block version 3/4 once they are a supermajority of blocks
-            // NOTE: This requires 1,000 blocks since the last checkpoint (on main
-            // net, less on test) in order to be applied. It is also limited to
-            // stopping addition of new v2/3 blocks to the tip of the chain.
-            if (block.getVersion() == Block.BLOCK_VERSION_BIP34
-                || block.getVersion() == Block.BLOCK_VERSION_BIP66) {
-                final Integer count = versionTally.getCountAtOrAbove(block.getVersion() + 1);
-                if (count != null
-                    && count >= params.getMajorityRejectBlockOutdated()) {
-                    throw new VerificationException.BlockVersionOutOfDate(block.getVersion());
-                }
-            }
 
             // This block connects to the best known block, it is a normal continuation of the system.
             TransactionOutputChanges txOutChanges = null;
@@ -580,7 +602,7 @@ public abstract class AbstractBlockChain {
                     // newStoredBlock is a part of the same chain, there's no fork. This happens when we receive a block
                     // that we already saw and linked into the chain previously, which isn't the chain head.
                     // Re-processing it is confusing for the wallet so just skip.
-                    log.warn("Saw duplicated block in main chain at height {}: {}",
+                    log.warn("Saw duplicated block in best chain at height {}: {}",
                             newBlock.getHeight(), newBlock.getHeader().getHash());
                     return;
                 }
@@ -756,7 +778,7 @@ public abstract class AbstractBlockChain {
         // Then build a list of all blocks in the old part of the chain and the new part.
         final LinkedList<StoredBlock> oldBlocks = getPartialChain(head, splitPoint, blockStore);
         final LinkedList<StoredBlock> newBlocks = getPartialChain(newChainHead, splitPoint, blockStore);
-        // Disconnect each transaction in the previous main chain that is no longer in the new main chain
+        // Disconnect each transaction in the previous best chain that is no longer in the new best chain
         StoredBlock storedNewHead = splitPoint;
         if (shouldVerifyTransactions()) {
             for (StoredBlock oldBlock : oldBlocks) {
@@ -856,7 +878,7 @@ public abstract class AbstractBlockChain {
     }
 
     /**
-     * @return the height of the best known chain, convenience for <tt>getChainHead().getHeight()</tt>.
+     * @return the height of the best known chain, convenience for {@code getChainHead().getHeight()}.
      */
     public final int getBestChainHeight() {
         return getChainHead().getHeight();
@@ -875,7 +897,7 @@ public abstract class AbstractBlockChain {
                                                    Set<Sha256Hash> falsePositives) throws VerificationException {
         for (Transaction tx : transactions) {
             try {
-                falsePositives.remove(tx.getHash());
+                falsePositives.remove(tx.getTxId());
                 if (clone)
                     tx = tx.params.getDefaultSerializer().makeTransaction(tx.bitcoinSerialize());
                 listener.receiveFromBlock(tx, block, blockType, relativityOffset++);

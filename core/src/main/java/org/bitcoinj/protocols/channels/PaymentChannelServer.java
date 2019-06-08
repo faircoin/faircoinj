@@ -26,11 +26,12 @@ import org.bitcoinj.wallet.Wallet;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
 import net.jcip.annotations.GuardedBy;
 import org.bitcoin.paymentchannel.Protos;
 import org.slf4j.LoggerFactory;
-import org.spongycastle.crypto.params.KeyParameter;
+import org.bouncycastle.crypto.params.KeyParameter;
 
 import javax.annotation.Nullable;
 import java.util.Map;
@@ -122,7 +123,7 @@ public class PaymentChannelServer {
 
         /**
          * <p>Called when a channel is being closed and must be signed, possibly with an encrypted key.</p>
-         * @return A future for the (nullable) KeyParameter for the ECKey, or <code>null</code> if no key is required.
+         * @return A future for the (nullable) KeyParameter for the ECKey, or {@code null} if no key is required.
          */
         @Nullable
         ListenableFuture<KeyParameter> getUserKey();
@@ -373,7 +374,7 @@ public class PaymentChannelServer {
             state.storeChannelInWallet(PaymentChannelServer.this);
             try {
                 receiveUpdatePaymentMessage(providedContract.getInitialPayment(), false /* no ack msg */);
-            } catch (VerificationException e) {
+            } catch (SignatureDecodeException | VerificationException e) {
                 log.error("Initial payment failed to verify", e);
                 error(e.getMessage(), Protos.Error.ErrorCode.BAD_TRANSACTION, CloseReason.REMOTE_SENT_INVALID_MESSAGE);
                 return;
@@ -418,13 +419,14 @@ public class PaymentChannelServer {
                 .addListener(new Runnable() {
                     @Override
                     public void run() {
-                        multisigContractPropogated(providedContract, contract.getHash());
+                        multisigContractPropogated(providedContract, contract.getTxId());
                     }
                 }, Threading.SAME_THREAD);
     }
 
     @GuardedBy("lock")
-    private void receiveUpdatePaymentMessage(Protos.UpdatePayment msg, boolean sendAck) throws VerificationException, ValueOutOfRangeException, InsufficientMoneyException {
+    private void receiveUpdatePaymentMessage(Protos.UpdatePayment msg, boolean sendAck) throws SignatureDecodeException,
+            VerificationException, ValueOutOfRangeException, InsufficientMoneyException {
         log.info("Got a payment update");
 
         Coin lastBestPayment = state.getBestValueToMe();
@@ -456,7 +458,7 @@ public class PaymentChannelServer {
                         log.info("Failed retrieving paymentIncrease info future");
                         error("Failed processing payment update", Protos.Error.ErrorCode.OTHER, CloseReason.UPDATE_PAYMENT_FAILED);
                     }
-                });
+                }, MoreExecutors.directExecutor());
             }
         }
 
@@ -513,7 +515,7 @@ public class PaymentChannelServer {
             } catch (InsufficientMoneyException e) {
                 log.error("Caught insufficient money exception handling message from client", e);
                 error(e.getMessage(), Protos.Error.ErrorCode.BAD_TRANSACTION, CloseReason.REMOTE_SENT_INVALID_MESSAGE);
-            } catch (IllegalStateException e) {
+            } catch (SignatureDecodeException e) {
                 log.error("Caught illegal state exception handling message from client", e);
                 error(e.getMessage(), Protos.Error.ErrorCode.SYNTAX_ERROR, CloseReason.REMOTE_SENT_INVALID_MESSAGE);
             }
@@ -526,8 +528,9 @@ public class PaymentChannelServer {
         log.error(message);
         Protos.Error.Builder errorBuilder;
         errorBuilder = Protos.Error.newBuilder()
-                .setCode(errorCode)
-                .setExplanation(message);
+                .setCode(errorCode);
+        if (message != null)
+            errorBuilder.setExplanation(message);
         conn.sendToClient(Protos.TwoWayChannelMessage.newBuilder()
                 .setError(errorBuilder)
                 .setType(Protos.TwoWayChannelMessage.MessageType.ERROR)
@@ -554,12 +557,12 @@ public class PaymentChannelServer {
         ListenableFuture<KeyParameter> keyFuture = conn.getUserKey();
         ListenableFuture<Transaction> result;
         if (keyFuture != null) {
-            result = Futures.transform(conn.getUserKey(), new AsyncFunction<KeyParameter, Transaction>() {
+            result = Futures.transformAsync(conn.getUserKey(), new AsyncFunction<KeyParameter, Transaction>() {
                 @Override
                 public ListenableFuture<Transaction> apply(KeyParameter userKey) throws Exception {
                     return state.close(userKey);
                 }
-            });
+            }, MoreExecutors.directExecutor());
         } else {
             result = state.close();
         }
@@ -586,7 +589,7 @@ public class PaymentChannelServer {
                 log.error("Failed to broadcast settlement tx", t);
                 conn.destroyConnection(clientRequestedClose);
             }
-        });
+        }, MoreExecutors.directExecutor());
     }
 
     /**
@@ -594,7 +597,7 @@ public class PaymentChannelServer {
      * resume this channel in the future and stops generating messages for the client.</p>
      *
      * <p>Note that this <b>MUST</b> still be called even after either
-     * {@link ServerConnection#destroyConnection(CloseReason)} or
+     * {@link PaymentChannelServer.ServerConnection#destroyConnection(PaymentChannelCloseException.CloseReason)} or
      * {@link PaymentChannelServer#close()} is called to actually handle the connection close logic.</p>
      */
     public void connectionClosed() {
@@ -608,7 +611,7 @@ public class PaymentChannelServer {
                     StoredPaymentChannelServerStates channels = (StoredPaymentChannelServerStates)
                             wallet.getExtensions().get(StoredPaymentChannelServerStates.EXTENSION_ID);
                     if (channels != null) {
-                        StoredServerChannel storedServerChannel = channels.getChannel(state.getContract().getHash());
+                        StoredServerChannel storedServerChannel = channels.getChannel(state.getContract().getTxId());
                         if (storedServerChannel != null) {
                             storedServerChannel.clearConnectedHandler();
                         }
@@ -637,7 +640,7 @@ public class PaymentChannelServer {
 
     /**
      * <p>Closes the connection by generating a settle message for the client and calls
-     * {@link ServerConnection#destroyConnection(CloseReason)}. Note that this does not broadcast
+     * {@link PaymentChannelServer.ServerConnection#destroyConnection(PaymentChannelCloseException.CloseReason)}. Note that this does not broadcast
      * the payment transaction and the client may still resume the same channel if they reconnect</p>
      * <p>
      * <p>Note that {@link PaymentChannelServer#connectionClosed()} must still be called after the connection fully

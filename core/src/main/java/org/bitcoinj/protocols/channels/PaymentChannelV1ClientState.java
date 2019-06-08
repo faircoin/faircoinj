@@ -23,10 +23,11 @@ import org.bitcoinj.crypto.TransactionSignature;
 import org.bitcoinj.protocols.channels.IPaymentChannelClient.ClientChannelProperties;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
+import org.bitcoinj.script.ScriptException;
 import org.bitcoinj.wallet.AllowUnconfirmedCoinSelector;
 import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
-import org.spongycastle.crypto.params.KeyParameter;
+import org.bouncycastle.crypto.params.KeyParameter;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
@@ -72,9 +73,9 @@ public class PaymentChannelV1ClientState extends PaymentChannelClientState {
 
     /**
      * Creates a state object for a payment channel client. It is expected that you be ready to
-     * {@link PaymentChannelClientState#initiate(KeyParameter, ClientChannelProperties)} after construction (to avoid creating objects for channels which are
+     * {@link PaymentChannelClientState#initiate(KeyParameter, IPaymentChannelClient.ClientChannelProperties)} after construction (to avoid creating objects for channels which are
      * not going to finish opening) and thus some parameters provided here are only used in
-     * {@link PaymentChannelClientState#initiate(KeyParameter, ClientChannelProperties)} to create the Multisig contract and refund transaction.
+     * {@link PaymentChannelClientState#initiate(KeyParameter, IPaymentChannelClient.ClientChannelProperties)} to create the Multisig contract and refund transaction.
      *
      * @param wallet a wallet that contains at least the specified amount of value.
      * @param myKey a freshly generated private key for this channel.
@@ -162,15 +163,15 @@ public class PaymentChannelV1ClientState extends PaymentChannelClientState {
             final Coin valueAfterFee = totalValue.subtract(Transaction.REFERENCE_DEFAULT_MIN_TX_FEE);
             if (Transaction.MIN_NONDUST_OUTPUT.compareTo(valueAfterFee) > 0)
                 throw new ValueOutOfRangeException("totalValue too small to use");
-            refundTx.addOutput(valueAfterFee, myKey.toAddress(params));
+            refundTx.addOutput(valueAfterFee, LegacyAddress.fromKey(params, myKey));
             refundFees = multisigFee.add(Transaction.REFERENCE_DEFAULT_MIN_TX_FEE);
         } else {
-            refundTx.addOutput(totalValue, myKey.toAddress(params));
+            refundTx.addOutput(totalValue, LegacyAddress.fromKey(params, myKey));
             refundFees = multisigFee;
         }
         refundTx.getConfidence().setSource(TransactionConfidence.Source.SELF);
-        log.info("initiated channel with multi-sig contract {}, refund {}", multisigContract.getHashAsString(),
-                refundTx.getHashAsString());
+        log.info("initiated channel with multi-sig contract {}, refund {}", multisigContract.getTxId(),
+                refundTx.getTxId());
         stateMachine.transition(State.INITIATED);
         // Client should now call getIncompleteRefundTransaction() and send it to the server.
     }
@@ -226,10 +227,10 @@ public class PaymentChannelV1ClientState extends PaymentChannelClientState {
      * the appropriate time if necessary.</p>
      */
     public synchronized void provideRefundSignature(byte[] theirSignature, @Nullable KeyParameter userKey)
-            throws VerificationException {
+            throws SignatureDecodeException, VerificationException {
         checkNotNull(theirSignature);
         stateMachine.checkState(State.WAITING_FOR_SIGNED_REFUND);
-        TransactionSignature theirSig = TransactionSignature.decodeFromBitcoin(theirSignature, true);
+        TransactionSignature theirSig = TransactionSignature.decodeFromBitcoin(theirSignature, true, false);
         if (theirSig.sigHashMode() != Transaction.SigHash.NONE || !theirSig.anyoneCanPay())
             throw new VerificationException("Refund signature was not SIGHASH_NONE|SIGHASH_ANYONECANPAY");
         // Sign the refund transaction ourselves.
@@ -266,7 +267,7 @@ public class PaymentChannelV1ClientState extends PaymentChannelClientState {
         StoredPaymentChannelClientStates channels = (StoredPaymentChannelClientStates)
                 wallet.getExtensions().get(StoredPaymentChannelClientStates.EXTENSION_ID);
         checkNotNull(channels, "You have not added the StoredPaymentChannelClientStates extension to the wallet.");
-        checkState(channels.getChannel(id, multisigContract.getHash()) == null);
+        checkState(channels.getChannel(id, multisigContract.getTxId()) == null);
         storedChannel = new StoredClientChannel(getMajorVersion(), id, multisigContract, refundTx, myKey, serverKey, valueToMe, refundFees, 0, true);
         channels.putChannel(storedChannel);
     }

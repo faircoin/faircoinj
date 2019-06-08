@@ -30,7 +30,7 @@ import javafx.scene.control.DatePicker;
 import javafx.scene.control.TextArea;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.spongycastle.crypto.params.KeyParameter;
+import org.bouncycastle.crypto.params.KeyParameter;
 import wallettemplate.utils.TextFieldValidator;
 
 import javax.annotation.Nullable;
@@ -84,7 +84,7 @@ public class WalletSettingsController {
         // Set the mnemonic seed words.
         final List<String> mnemonicCode = seed.getMnemonicCode();
         checkNotNull(mnemonicCode);    // Already checked for encryption.
-        String origWords = Utils.join(mnemonicCode);
+        String origWords = Utils.SPACE_JOINER.join(mnemonicCode);
         wordsArea.setText(origWords);
 
         // Validate words as they are being typed.

@@ -1,5 +1,6 @@
 /*
  * Copyright 2011 Google Inc.
+ * Copyright 2019 Andreas Schildbach
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,15 +48,15 @@ public class GetDataMessage extends ListMessage {
     }
 
     public void addTransaction(Sha256Hash hash) {
-        addItem(new InventoryItem(InventoryItem.Type.Transaction, hash));
+        addItem(new InventoryItem(InventoryItem.Type.TRANSACTION, hash));
     }
 
     public void addBlock(Sha256Hash hash) {
-        addItem(new InventoryItem(InventoryItem.Type.Block, hash));
+        addItem(new InventoryItem(InventoryItem.Type.BLOCK, hash));
     }
 
     public void addFilteredBlock(Sha256Hash hash) {
-        addItem(new InventoryItem(InventoryItem.Type.FilteredBlock, hash));
+        addItem(new InventoryItem(InventoryItem.Type.FILTERED_BLOCK, hash));
     }
 
     public Sha256Hash getHashOf(int i) {

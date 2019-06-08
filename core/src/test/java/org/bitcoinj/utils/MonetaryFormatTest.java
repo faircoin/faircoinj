@@ -24,6 +24,7 @@ import static org.junit.Assert.assertEquals;
 
 import java.util.Locale;
 
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.bitcoinj.core.Coin;
@@ -210,14 +211,14 @@ public class MonetaryFormatTest {
 
     @Test
     public void standardCodes() throws Exception {
-        assertEquals("BTC 0.00", MonetaryFormat.BTC.format(Coin.ZERO).toString());
-        assertEquals("mBTC 0.00", MonetaryFormat.MBTC.format(Coin.ZERO).toString());
-        assertEquals("µBTC 0", MonetaryFormat.UBTC.format(Coin.ZERO).toString());
+        assertEquals("FAIR 0.00", MonetaryFormat.BTC.format(Coin.ZERO).toString());
+        assertEquals("mFAIR 0.00", MonetaryFormat.MBTC.format(Coin.ZERO).toString());
+        assertEquals("µFAIR 0", MonetaryFormat.UBTC.format(Coin.ZERO).toString());
     }
 
     @Test
     public void customCode() throws Exception {
-        assertEquals("dBTC 0", MonetaryFormat.UBTC.code(1, "dBTC").shift(1).format(Coin.ZERO).toString());
+        assertEquals("dFAIR 0", MonetaryFormat.UBTC.code(1, "dFAIR").shift(1).format(Coin.ZERO).toString());
     }
 
     /**
@@ -227,18 +228,18 @@ public class MonetaryFormatTest {
     public void noCode() throws Exception {
         assertEquals("0", MonetaryFormat.UBTC.noCode().shift(0).format(Coin.ZERO).toString());
         // Ensure that inserting a code after codes are wiped, works
-        assertEquals("dBTC 0", MonetaryFormat.UBTC.noCode().code(1, "dBTC").shift(1).format(Coin.ZERO).toString());
+        assertEquals("dFAIR 0", MonetaryFormat.UBTC.noCode().code(1, "dFAIR").shift(1).format(Coin.ZERO).toString());
     }
 
     @Test
     public void codeOrientation() throws Exception {
-        assertEquals("BTC 0.00", MonetaryFormat.BTC.prefixCode().format(Coin.ZERO).toString());
-        assertEquals("0.00 BTC", MonetaryFormat.BTC.postfixCode().format(Coin.ZERO).toString());
+        assertEquals("FAIR 0.00", MonetaryFormat.BTC.prefixCode().format(Coin.ZERO).toString());
+        assertEquals("0.00 FAIR", MonetaryFormat.BTC.postfixCode().format(Coin.ZERO).toString());
     }
 
     @Test
     public void codeSeparator() throws Exception {
-        assertEquals("BTC@0.00", MonetaryFormat.BTC.codeSeparator('@').format(Coin.ZERO).toString());
+        assertEquals("FAIR@0.00", MonetaryFormat.BTC.codeSeparator('@').format(Coin.ZERO).toString());
     }
 
     @Test(expected = NumberFormatException.class)
@@ -251,6 +252,12 @@ public class MonetaryFormatTest {
         final Coin value = Coin.valueOf(-1234567890l);
         assertEquals("-12.34567890", NO_CODE.withLocale(Locale.US).format(value).toString());
         assertEquals("-12,34567890", NO_CODE.withLocale(Locale.GERMANY).format(value).toString());
+    }
+
+    @Ignore("non-determinism between OpenJDK versions")
+    @Test
+    public void withLocaleDevanagari() throws Exception {
+        final Coin value = Coin.valueOf(-1234567890l);
         assertEquals("-१२.३४५६७८९०", NO_CODE.withLocale(new Locale("hi", "IN")).format(value).toString()); // Devanagari
     }
 

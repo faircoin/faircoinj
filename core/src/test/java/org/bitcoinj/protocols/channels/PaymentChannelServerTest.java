@@ -30,11 +30,11 @@ import org.junit.runners.Parameterized;
 import java.util.Arrays;
 import java.util.Collection;
 
-import static junit.framework.TestCase.assertTrue;
 import static org.bitcoin.paymentchannel.Protos.TwoWayChannelMessage;
 import static org.bitcoin.paymentchannel.Protos.TwoWayChannelMessage.MessageType;
 import static org.easymock.EasyMock.*;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
 public class PaymentChannelServerTest {
@@ -49,7 +49,7 @@ public class PaymentChannelServerTest {
         broadcaster = createMock(TransactionBroadcaster.class);
         wallet = createMock(Wallet.class);
         connection = createMock(PaymentChannelServer.ServerConnection.class);
-        serverVersionCapture = new Capture<TwoWayChannelMessage>();
+        serverVersionCapture = new Capture<>();
         connection.sendToClient(capture(serverVersionCapture));
         Utils.setMockClock();
     }
